@@ -91,6 +91,7 @@ def detect(im, param_vals):
             feed_dict = {x: numpy.stack([scaled_im])}
             feed_dict.update(dict(zip(params, param_vals)))
             y_vals.append(sess.run(y, feed_dict=feed_dict))
+        print(y_vals[0].shape)
 
     # Interpret the results in terms of bounding boxes in the input image.
     # Do this by identifying windows (at all scales) where the model predicts a
@@ -169,9 +170,7 @@ def post_process(matches):
                numpy.min(maxs, axis=0).flatten(),
                numpy.max(present_probs),
                letter_probs[numpy.argmax(present_probs)])
-def print_help():
-    print("\nToo few arguments. Expected: 3")
-    print("Usage: python detect.py [input_image] [weights] [output_image]\n")
+
 
 def letter_probs_to_code(letter_probs):
     return "".join(common.CHARS[i] for i in numpy.argmax(letter_probs, axis=1))
@@ -196,7 +195,7 @@ if __name__ == "__main__":
 
         color = (0.0, 255.0, 0.0)
         cv2.rectangle(im, pt1, pt2, color)
-        print("\n[Number Detected]\t==>\t["+code+"]\n")
+
         cv2.putText(im,
                     code,
                     pt1,

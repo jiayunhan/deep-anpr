@@ -99,7 +99,7 @@ def detect(im, param_vals):
     # To obtain pixel coordinates, the window coordinates are scaled according
     # to the stride size, and pixel coordinates.
     for i, (scaled_im, y_val) in enumerate(zip(scaled_ims, y_vals)):
-        #print(-math.log(1./0.99 - 1))
+        print(numpy.argwhere(y_val[0, :, :, 0] > -math.log(1./0.99 - 1)))
         #print(numpy.argwhere(y_val[0, :, :, 0] >-math.log(1./0.99 - 1)))
         for window_coords in numpy.argwhere(y_val[0, :, :, 0] >
                                                        -math.log(1./0.99 - 1)):
@@ -231,6 +231,7 @@ if __name__ == "__main__":
     for img in imgs:
         im = cv2.imread(img)
         im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) / 255.
+        print(im_gray)
         if(is_dir):
             output_prediction(im_gray,param_vals)
         else:

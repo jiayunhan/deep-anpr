@@ -66,13 +66,13 @@ def avg_pool(x, ksize=(2, 2), stride=(2, 2)):
                         strides=[1, stride[0], stride[1], 1], padding='SAME')
 
 
-def convolutional_layers():
+def convolutional_layers(x_hat):
     """
     Get the convolutional layers of the model.
 
     """
     x = tf.placeholder(tf.float32, [None, None, None])
-
+    x = x_hat
     # First layer
     W_conv1 = weight_variable([5, 5, 1, 48])
     b_conv1 = bias_variable([48])
@@ -127,7 +127,7 @@ def get_training_model():
     return (x, y, conv_vars + [W_fc1, b_fc1, W_fc2, b_fc2])
 
 
-def get_detect_model():
+def get_detect_model(x_hat):
     """
     The same as the training model, except it acts on an arbitrarily sized
     input, and slides the 128x64 window across the image in 8x8 strides.
@@ -136,7 +136,7 @@ def get_detect_model():
     of the training model, for the window at coordinates `(8 * i, 4 * j)`.
 
     """
-    x, conv_layer, conv_vars = convolutional_layers()
+    x, conv_layer, conv_vars = convolutional_layers(x_hat)
     
     # Fourth layer
     W_fc1 = weight_variable([8 * 32 * 128, 2048])
@@ -151,4 +151,7 @@ def get_detect_model():
     h_conv2 = conv2d(h_conv1, W_conv2) + b_fc2
 
     return (x, h_conv2, conv_vars + [W_fc1, b_fc1, W_fc2, b_fc2])
+
+#def get_keras_model(logits=False, input_ph=None, img_rows=28, img_cols=28,
+#              channels=1, nb_filters=64, nb_classes=10):
 

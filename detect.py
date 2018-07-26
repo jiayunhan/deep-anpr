@@ -47,7 +47,8 @@ import tensorflow as tf
 
 import common
 import model
-
+from os import listdir
+from os.path import isfile,join,isdir
 
 def make_scaled_ims(im, min_shape):
     ratio = 1. / 2 ** 0.5
@@ -91,7 +92,6 @@ def detect(im, param_vals):
             feed_dict = {x: numpy.stack([scaled_im])}
             feed_dict.update(dict(zip(params, param_vals)))
             y_vals.append(sess.run(y, feed_dict=feed_dict))
-        print(y_vals[0].shape)
 
     # Interpret the results in terms of bounding boxes in the input image.
     # Do this by identifying windows (at all scales) where the model predicts a
@@ -100,8 +100,11 @@ def detect(im, param_vals):
     # To obtain pixel coordinates, the window coordinates are scaled according
     # to the stride size, and pixel coordinates.
     for i, (scaled_im, y_val) in enumerate(zip(scaled_ims, y_vals)):
+        #print(-math.log(1./0.99 - 1))
+        #print(numpy.argwhere(y_val[0, :, :, 0] >-math.log(1./0.99 - 1)))
         for window_coords in numpy.argwhere(y_val[0, :, :, 0] >
                                                        -math.log(1./0.99 - 1)):
+            
             letter_probs = (y_val[0,
                                   window_coords[0],
                                   window_coords[1], 1:].reshape(
@@ -171,28 +174,21 @@ def post_process(matches):
                numpy.max(present_probs),
                letter_probs[numpy.argmax(present_probs)])
 
+def print_help():
+    print("\nToo few arguments. Expected: 3")
+    print("Usage: python detect.py [input_image] [weights] [output_image]\n")
+    print("Usage: python detect.py [input_folder] [weights] [output_folder]\n")
 
 def letter_probs_to_code(letter_probs):
     return "".join(common.CHARS[i] for i in numpy.argmax(letter_probs, axis=1))
 
-
-if __name__ == "__main__":
-    if(len(sys.argv)<4):
-        print_help()
-        exit()
-    im = cv2.imread(sys.argv[1])
-    im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) / 255.
-
-    f = numpy.load(sys.argv[2])
-    param_vals = [f[n] for n in sorted(f.files, key=lambda s: int(s[4:]))]
-
+def output_image(im_gray, param_vals, out_name):
     for pt1, pt2, present_prob, letter_probs in post_process(
                                                   detect(im_gray, param_vals)):
         pt1 = tuple(reversed(map(int, pt1)))
         pt2 = tuple(reversed(map(int, pt2)))
-
         code = letter_probs_to_code(letter_probs)
-
+        print("\n[Number Detected]\t==>\t["+code+"]\n")
         color = (0.0, 255.0, 0.0)
         cv2.rectangle(im, pt1, pt2, color)
 
@@ -212,5 +208,36 @@ if __name__ == "__main__":
                     (255, 255, 255),
                     thickness=2)
 
-    cv2.imwrite(sys.argv[3], im)
+    cv2.imwrite(out_name, im)
+
+def output_prediction(im_gray, param_vals):
+    for pt1, pt2, present_prob, letter_probs in post_process(
+                                                  detect(im_gray, param_vals)):
+        pt1 = tuple(reversed(map(int, pt1)))
+        pt2 = tuple(reversed(map(int, pt2)))
+        code = letter_probs_to_code(letter_probs)
+        print("\n[Number Detected]\t==>\t["+code+"]\n")
+
+if __name__ == "__main__":
+    if(len(sys.argv)<4):
+        print_help()
+        exit()
+    f = numpy.load(sys.argv[2])
+    param_vals = [f[n] for n in sorted(f.files, key=lambda s: int(s[4:]))]
+    mypath = sys.argv[1]
+    is_dir = isdir(mypath)
+    if(is_dir):
+        imgs = [join(mypath,f) for f in listdir(mypath) if isfile(join(mypath, f))]
+    else:
+        imgs = [mypath]
+
+    for img in imgs:
+        im = cv2.imread(img)
+        im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) / 255.
+        if(is_dir):
+            output_prediction(im_gray,param_vals)
+        else:
+            output_image(im_gray,param_vals,sys.argv[3])
+
+
 

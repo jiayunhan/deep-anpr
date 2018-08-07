@@ -65,7 +65,6 @@ def avg_pool(x, ksize=(2, 2), stride=(2, 2)):
   return tf.nn.avg_pool(x, ksize=[1, ksize[0], ksize[1], 1],
                         strides=[1, stride[0], stride[1], 1], padding='SAME')
 
-
 def convolutional_layers(x_hat = None):
     """
     Get the convolutional layers of the model.
@@ -154,4 +153,7 @@ def get_detect_model(x_hat = None):
     h_conv2 = conv2d(h_conv1, W_conv2) + b_fc2
 
     return (x, h_conv2, conv_vars + [W_fc1, b_fc1, W_fc2, b_fc2])
+
+#def get_keras_model(logits=False, input_ph=None, img_rows=28, img_cols=28,
+#              channels=1, nb_filters=64, nb_classes=10):
 

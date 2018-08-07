@@ -85,6 +85,7 @@ def detect(im, param_vals):
     # Load the model which detects number plates over a sliding window.
     x, y, params = model.get_detect_model()
 
+
     # Execute the model at each scale.
     with tf.Session(config=tf.ConfigProto()) as sess:
         y_vals = []
@@ -92,6 +93,7 @@ def detect(im, param_vals):
             feed_dict = {x: numpy.stack([scaled_im])}
             feed_dict.update(dict(zip(params, param_vals)))
             y_vals.append(sess.run(y, feed_dict=feed_dict))
+            print("Y: ", sess.run(y, feed_dict=feed_dict).shape)
 
     # Interpret the results in terms of bounding boxes in the input image.
     # Do this by identifying windows (at all scales) where the model predicts a

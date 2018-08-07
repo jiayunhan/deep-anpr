@@ -40,6 +40,7 @@ CHARS = LETTERS + DIGITS
 
 def softmax(a):
     exps = numpy.exp(a.astype(numpy.float64))
+    #print("what.", numpy.sum(exps, axis=-1)[:, numpy.newaxis])
     return exps / numpy.sum(exps, axis=-1)[:, numpy.newaxis]
 
 def sigmoid(a):

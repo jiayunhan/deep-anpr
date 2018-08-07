@@ -75,7 +75,7 @@ def convolutional_layers(x_hat = None):
     if(x_hat != None):
         x = x_hat
     # First layer
-    print("X SHAPE: ", x.shape)
+
     W_conv1 = weight_variable([5, 5, 1, 48])
     b_conv1 = bias_variable([48])
     x_expanded = tf.expand_dims(x, 3)

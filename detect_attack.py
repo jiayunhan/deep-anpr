@@ -53,7 +53,6 @@ from detect_get_logits import get_attack_logits
 def make_scaled_ims(im, min_shape):
 	ratio = 1. / 2 ** 0.5
 	shape = (im.shape[0] / ratio, im.shape[1] / ratio)
-
 	while True:
 		shape = (int(shape[0] * ratio), int(shape[1] * ratio))
 		if shape[0] < min_shape[0] or shape[1] < min_shape[1]:
@@ -80,8 +79,8 @@ def detect(im, param_vals):
     """
 
     # Convert the image to various scales.
-    #scaled_ims = list(make_scaled_ims(im, model.WINDOW_SHAPE))
-    scaled_ims = hide_attack(im, param_vals)
+    scaled_ims = list(make_scaled_ims(im, model.WINDOW_SHAPE))
+    #scaled_ims = hide_attack(im, param_vals)
     #print(scaled_ims[0].shape)
 
     # Load the model which detects number plates over a sliding window.
@@ -102,6 +101,51 @@ def detect(im, param_vals):
     #
     # To obtain pixel coordinates, the window coordinates are scaled according
     # to the stride size, and pixel coordinates.
+    count = 0
+    for i, (scaled_im, y_val) in enumerate(zip(scaled_ims, y_vals)):
+        for window_coords in numpy.argwhere(y_val[0, :, :, 0] >
+                                                       -math.log(1./0.99 - 1)):
+
+            count = count + 1
+            letter_probs = (y_val[0,
+                                  window_coords[0],
+                                  window_coords[1], 1:].reshape(
+                                    7, len(common.CHARS)))
+            letter_probs = common.softmax(letter_probs)
+
+            img_scale = float(im.shape[0]) / scaled_im.shape[0]
+
+            bbox_tl = window_coords * (8, 4) * img_scale
+            bbox_size = numpy.array(model.WINDOW_SHAPE) * img_scale
+
+            present_prob = common.sigmoid(
+                               y_val[0, window_coords[0], window_coords[1], 0])
+
+            yield bbox_tl, bbox_tl + bbox_size, present_prob, letter_probs
+
+    #print("Detected count: ", count) 
+
+def detect_max_shape(im, param_vals):
+    scaled_ims = list(make_scaled_ims(im, model.WINDOW_SHAPE))
+
+    x, y, params = model.get_detect_model()
+
+    # Execute the model at each scale.
+    with tf.Session(config=tf.ConfigProto()) as sess:
+        y_vals = []
+        for scaled_im in scaled_ims:
+            feed_dict = {x: numpy.stack([scaled_im])}
+            feed_dict.update(dict(zip(params, param_vals)))
+            y_vals.append(sess.run(y, feed_dict=feed_dict))
+
+    # Interpret the results in terms of bounding boxes in the input image.
+    # Do this by identifying windows (at all scales) where the model predicts a
+    # number plate has a greater than 50% probability of appearing.
+    #
+    # To obtain pixel coordinates, the window coordinates are scaled according
+    # to the stride size, and pixel coordinates.
+    max_im = scaled_ims[0]
+    max_prob = 0
     for i, (scaled_im, y_val) in enumerate(zip(scaled_ims, y_vals)):
         for window_coords in numpy.argwhere(y_val[0, :, :, 0] >
                                                        -math.log(1./0.99 - 1)):
@@ -119,133 +163,86 @@ def detect(im, param_vals):
             present_prob = common.sigmoid(
                                y_val[0, window_coords[0], window_coords[1], 0])
 
-            yield bbox_tl, bbox_tl + bbox_size, present_prob, letter_probs
+            if(present_prob > max_prob):
+            	max_prob = present_prob
+            	max_im = scaled_im 
+    
+    return max_im.shape
 
-def hide_attack_color(im, param_vals):
-	scaled_ims_perturb = hide_attack(im, param_vals)
+def isDetected(im, param_vals):
+	im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) / 255.
+	scaled_ims = list(make_scaled_ims(im_gray, model.WINDOW_SHAPE))
+	x, y, params = model.get_detect_model()
 
-	scaled_ims = list(make_scaled_ims(im, model.WINDOW_SHAPE))
+	with tf.Session(config=tf.ConfigProto()) as sess:
+		y_vals = []
+		for scaled_im in scaled_ims:
+			feed_dict = {x: numpy.stack([scaled_im])}
+			feed_dict.update(dict(zip(params, param_vals)))
+			y_vals.append(sess.run(y, feed_dict=feed_dict))
 
-	def get_avg_loss(scaled_ims_perturb, scaled_ims):
-		loss = 0
-		length = len(scaled_ims)
+	count = 0
+	for i, (scaled_im, y_val) in enumerate(zip(scaled_ims, y_vals)):
+		for window_coords in numpy.argwhere(y_val[0, :, :, 0] > -math.log(1./0.99 - 1)):
+			count = count + 1 #only care about number of boxes it can detect 
+			
+	print("COUNT: ", count)
+	return count != 0
 
-		return loss/length 
-	
-	# optim_step = tf.train.GradientDescentOptimizer(1e-1).minimize
 
+def original_img_hide_attack_color(im, param_vals):
 
+	def perturb(img, param_vals):
+		x_origin = tf.Variable(tf.zeros(img.shape))
+		assign_origin_op = tf.assign(x_origin, img)
 
-def hide_attack(im, param_vals):
-	scaled_ims = list(make_scaled_ims(im, model.WINDOW_SHAPE))
-	print('LENGTH', len(scaled_ims))
+		#convert image to gray so it can pass through detect model 
+		im_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) / 255.
 
-	def perturb(img):
-		input = numpy.stack([img])
-		x_hat = tf.Variable(tf.zeros(input.shape))
-		assign_op = tf.assign(x_hat, input)
-		_, y, params = model.get_detect_model(x_hat)
+		#resize colored image to match best scaled image shape 
+		max_im_shape = detect_max_shape(im_gray, param_vals)
+		im_color_resize = tf.squeeze(tf.image.resize_images(x_origin, (max_im_shape[0], max_im_shape[1])))
+		
+		img_gray = tf.image.rgb_to_grayscale(im_color_resize) #(250,250,1)
+		im_gray = tf.squeeze(tf.cast(img_gray, numpy.float32)) #(250,250)
 
+		input = tf.stack([im_gray]) #(1,250,250)
+
+		_, y, params = model.get_detect_model(input)
+
+		#mean over reduced probability for presence and letter detection, y[:,:,:,0] for just presence 
 		y_mean = tf.reduce_mean(y)
 
-		optim_step = tf.train.GradientDescentOptimizer(1e-1).minimize(y_mean, var_list = [x_hat])
+		optim_step = tf.train.GradientDescentOptimizer(3).minimize(y_mean, var_list = [x_origin])
 		adv = []
-		init = tf.global_variables_initializer()
 
+		#create bounds for how far the image can deviate 
+		epsilon = tf.placeholder(tf.float32, ())
+		below = img - epsilon
+		above = img + epsilon 
+		projected = tf.clip_by_value(tf.clip_by_value(x_origin, below, above), 0, 255)
+
+		with tf.control_dependencies([projected]):
+			project_step = tf.assign(x_origin, projected)
+
+		#training 
 		with tf.Session(config=tf.ConfigProto()) as sess:
-			sess.run(init)
-			sess.run(assign_op)
+			sess.run(assign_origin_op)
 			feed_dict = {}
 			feed_dict.update(dict(zip(params, param_vals)))
-			for i in range(10):
+			for i in range(400):
 				sess.run(optim_step,feed_dict = feed_dict)
+				sess.run(project_step, feed_dict = {epsilon: 8000/255.0})
 				print(sess.run(y_mean, feed_dict = feed_dict))
-			adv = (x_hat.eval())
+				if(isDetected(x_origin.eval().astype(numpy.uint8), param_vals) == False):
+					break
+			adv = (x_origin.eval().astype(numpy.uint8))
 
-		list0 = []
-		for i in adv[0]:
-			list0.append(i)
-			arr = numpy.array(list0)
-		arr = arr*255 #scales the values so cv2 can write image to file properly 
-		for i in range(arr.shape[0]): 
-			for j in range(arr.shape[1]):
-				if arr[i][j] <0:
-					arr[i][j] = 0
-		cv2.imwrite('NewScaledImage', arr)
-		return arr
+		return adv 
 
 
-	for i in range(len(scaled_ims)):
-		scaled_ims[i] = perturb(scaled_ims[i])
-		print(scaled_ims[i])
+	return perturb(im, param_vals)
 
-	return scaled_ims
-
-def attack(im, param_vals, attack_targets):
-
-	x, y, params = model.get_detect_model()
-	#letter_prob_arr = []
-	# Execute the model at each scale.
-	print(zip(params, param_vals))
-	y = sess.run(y, feed_dict=dict(zip(params, param_vals)))
-
-	logits_arr = get_attack_logits(im, param_vals, attack_targets, sess)
-   
-	print("Y: ", y)
-
-	# #print(tf.reshape(y[:, 1:],[-1, len(common.CHARS)]))
-	# for tl, br, present_prob, letter_probs in post_process(detect(im, param_vals)):
-	#     letter_prob_arr.append(letter_probs)
-	  
-
-	#Modified PGD code from www.anishathalye.com/2017/07/25/synthesizing-adversarial-examples/
-	def pgd_attack(im, target_class, y, class_num):
-		#need to change image dimensions
-		image = tf.Variable(tf.zeros((im.shape[0], im.shape[1], 3))) 
-		x_hat = image 
-		x = tf.placeholder(tf.float32, (im.shape[0], im.shape[1], 3))
-
-		assign_op = tf.assign(x_hat, x)
-		learning_rate = tf.placeholder(tf.float32, ())
-		y_hat = tf.placeholder(tf.int32, ())
-
-		#26 letters + 10 numbers = 36 total classes 
-		labels = tf.one_hot(y_hat, class_num)
-
-		print("labels: ", labels)
-		#want to minimize y and y_hat
-		loss = tf.nn.softmax_cross_entropy_with_logits(logits = y, labels=[labels])
-		optim_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, var_list = [x_hat])
-		
-		epsilon = tf.placeholder(tf.float32, ())
-		below = x - epsilon
-		above = x + epsilon 
-		projected = tf.clip_by_value(tf.clip_by_value(x_hat, below, above), 0, 1)
-
-		#projected gradient descent 
-		with tf.control_dependencies([projected]):
-			project_step = tf.assign(x_hat, projected)
-			train_epsilon = 2.0/255.0
-			train_lr = 1e-1
-			train_steps = 100
-			train_target = target_class
-			sess.run(assign_op, feed_dict={x: im})
-
-			for i in range(train_steps):
-				_, loss_value = sess.run([optim_step, loss], feed_dict = {learning_rate: train_lr, y_hat:train_target})
-				sess.run(project_step, feed_dict={x: im, epsilon: train_epsilon})
-				print('step %d, loss = %g' % (i+1, loss_value))
-
-		adv = x_hat.eval()
-		return adv
-	
-	#iterate PGD for each letter we want to skew the license plate to 
-	for i in range(len(logits_arr)):
-		print('Letter Index: ', i+1)
-		#36 class numbers, 10nums + 26letters 
-		im = pgd_attack(im, attack_targets[i], y, 36)
-
-	return im 
 
 def _overlaps(match1, match2):
 	bbox_tl1, bbox_br1, _, _ = match1
@@ -287,7 +284,6 @@ def post_process(matches):
 
 	"""
 	groups = _group_overlapping_rectangles(matches)
-
 	for group_matches in groups.values():
 		mins = numpy.stack(numpy.array(m[0]) for m in group_matches)
 		maxs = numpy.stack(numpy.array(m[1]) for m in group_matches)
@@ -309,22 +305,18 @@ def letter_probs_to_code(letter_probs):
 if __name__ == "__main__":
     if(len(sys.argv)<4):
         print_help()
-        exit()
-    im = cv2.imread(sys.argv[1])
-    im_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) / 255.
-
+        exit()    
+    
     f = numpy.load(sys.argv[2])
     param_vals = [f[n] for n in sorted(f.files, key=lambda s: int(s[4:]))]
 
-    #hide_attack(im_gray, param_vals)
+    im = cv2.imread(sys.argv[1])
 
-    # list0 = []
-    # for i in image[0]:
-    # 	list0.append(i)
-    # arr = numpy.array(list0)
-    # print(arr)
+    img_color = original_img_hide_attack_color(im, param_vals)
 
-
+    im_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY) / 255.
+    #print(img_color)
+    cv2.imwrite('perturbed' + sys.argv[3], img_color)
     for pt1, pt2, present_prob, letter_probs in post_process(
                                                   detect(im_gray, param_vals)):
         pt1 = tuple(reversed(map(int, pt1)))
@@ -353,6 +345,3 @@ if __name__ == "__main__":
 
     cv2.imwrite(sys.argv[3], im)
 	
-
-
-
